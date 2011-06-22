@@ -106,6 +106,7 @@ NOTE_INDEX = []
 SN_USER = urllib2.quote(vim.eval("s:user"))
 SN_TOKEN = None
 NOTE_FETCH_LENGTH = 20
+VIM_ENCODING = vim.eval('&encoding')
 
 def scratch_buffer(sb_name = DEFAULT_SCRATCH_NAME):
     """ Opens a scratch buffer from python """
@@ -125,7 +126,7 @@ def simple_note_auth(user, password):
     values = base64.encodestring(auth_params)
     request = urllib2.Request(AUTH_URL, values)
     try:
-        res = urllib2.urlopen(request).read()
+        res = urllib2.urlopen(request).read().decode('utf-8')
         token = urllib2.quote(res)
     except IOError, e: # no connection exception
         token = None
@@ -151,16 +152,13 @@ def get_note(user, token, noteid):
 
     """
     # request note
-    params = '/%s?auth=%s&email=%s' % (str(noteid), token, user)
+    params = '/%s?auth=%s&email=%s' % (noteid.encode('utf-8'), token, user)
     request = urllib2.Request(DATA_URL+params)
     try:
         response = urllib2.urlopen(request)
     except IOError, e:
         return None
-    note = json.loads(response.read())
-    # use UTF-8 encoding
-    note["content"] = note["content"].encode('utf-8')
-    note["tags"] = [t.encode('utf-8') for t in note["tags"]]
+    note = json.loads(response.read().decode("utf-8"))
     return note
 
 def update_note_object(user, token, note):
@@ -176,20 +174,15 @@ def update_note_object(user, token, note):
             False with error message otherwise
 
     """
-    # use UTF-8 encoding
-    note["content"] = unicode(note["content"], 'utf-8')
-    if note.has_key("tags"):
-        note["tags"] = [unicode(t, 'utf-8') for t in note["tags"]]
-
     # determine whether to create a new note or updated an existing one
     if note.has_key("key"):
         url = '%s/%s?auth=%s&email=%s' % (DATA_URL, note["key"], token, user)
     else:
         url = '%s?auth=%s&email=%s' % (DATA_URL, token, user)
-    request = urllib2.Request(url, json.dumps(note))
+    request = urllib2.Request(url, json.dumps(note).encode('utf-8'))
     response = ""
     try:
-        response = urllib2.urlopen(request).read()
+        response = urllib2.urlopen(request).read().decode('utf-8')
     except IOError, e:
         return False, e
     return True, json.loads(response)
@@ -233,7 +226,7 @@ def get_note_list(user, token):
     # perform initial HTTP request
     try:
       request = urllib2.Request(INDX_URL+params)
-      response = json.loads(urllib2.urlopen(request).read())
+      response = json.loads(urllib2.urlopen(request).read().decode('utf-8'))
       notes["data"].extend(response["data"])
     except IOError, e:
       status = -1
@@ -247,7 +240,7 @@ def get_note_list(user, token):
         # perform the actual HTTP request
         try:
           request = urllib2.Request(INDX_URL+params)
-          response = json.loads(urllib2.urlopen(request).read())
+          response = json.loads(urllib2.urlopen(request).read().decode('utf-8'))
           notes["data"].extend(response["data"])
         except IOError, e:
           status = -1
@@ -290,13 +283,13 @@ def format_title(note):
     note_lines = note["content"].split("\n")
     # format date
     mt = time.localtime(float(note["modifydate"]))
-    mod_time = time.strftime("%a, %d %b %Y %H:%M:%S", mt)
+    mod_time = time.strftime("%a, %d %b %Y %H:%M:%S", mt).decode(VIM_ENCODING)
     if len(note_lines) > 0:
         title = "%s [%s]" % (note_lines[0], mod_time)
     else:
         title = "%s [%s]" % (note["key"], mod_time)
 
-    return (str(title)[0:80])
+    return title[0:80]
 
 class NoteFetcher(Thread):
     """ class to fetch a note running in a thread
@@ -355,7 +348,7 @@ note = get_note(SN_USER, get_token(), note_id)
 buffer = vim.current.buffer
 # remove cursorline
 vim.command("setlocal nocursorline")
-buffer[:] = map(lambda x: str(x), note["content"].split("\n"))
+buffer[:] = map(lambda x: x.encode(VIM_ENCODING), note["content"].split("\n"))
 EOF
 endfunction
 
@@ -363,7 +356,7 @@ endfunction
 function! s:UpdateNoteFromCurrentBuffer()
 python << EOF
 note_id = vim.eval("g:simplenote_current_note_id")
-content = "\n".join(str(line) for line in vim.current.buffer[:])
+content = "\n".join(line.decode(VIM_ENCODING) for line in vim.current.buffer[:])
 result, err_msg = update_note_content(SN_USER, get_token(), content, note_id)
 if result == True:
     print "Update successful."
@@ -403,7 +396,7 @@ if param == "-l":
         notes = get_notes_from_keys(note_list)
         notes.sort(key=lambda k: k['modifydate'])
         notes.reverse()
-        note_titles = [format_title(n) for n in notes if n["deleted"] != 1]
+        note_titles = [format_title(n).encode(VIM_ENCODING) for n in notes if n["deleted"] != 1]
         NOTE_INDEX = [n["key"] for n in notes if n["deleted"] != 1]
         buffer[:] = note_titles
 
@@ -420,7 +413,7 @@ elif param == "-d":
 elif param == "-u":
     vim.command("call <SID>UpdateNoteFromCurrentBuffer()")
 elif param == "-n":
-    content = "\n".join(str(line) for line in vim.current.buffer[:])
+    content = "\n".join(line.decode(VIM_ENCODING) for line in vim.current.buffer[:])
     result, note = update_note_content(SN_USER, get_token(), content)
     if result == True:
         vim.command(""" let g:simplenote_current_note_id="%s" """ % note["key"])
